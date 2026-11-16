@@ -94,9 +94,9 @@ export function avatarThumb(charId, jacket) {
     renderer.setSize(200, 200);
     const scene = new THREE.Scene();
     addStudioLights(scene);
-    const camera = new THREE.PerspectiveCamera(22, 1, 0.1, 30);
-    camera.position.set(0.45, 1.0, 3.25);
-    camera.lookAt(0, 0.87, 0);
+    const camera = new THREE.PerspectiveCamera(28, 1, 0.1, 30);
+    camera.position.set(0.38, 0.78, 3.1);
+    camera.lookAt(0, 0.68, 0);
     thumb = { renderer, scene, camera };
   }
   const av = createAvatar(charId, jacket);

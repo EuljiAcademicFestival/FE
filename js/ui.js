@@ -112,7 +112,7 @@ export class Setup {
     });
     $('#charPrev').addEventListener('click', () => this._cycle(-1));
     $('#charNext').addEventListener('click', () => this._cycle(1));
-    $$('.seg__btn').forEach((b) => b.addEventListener('click', () => { sfx.tap(); this.setJacket(b.dataset.jacket === '1'); }));
+    $$('.seg__btn', this.root).forEach((b) => b.addEventListener('click', () => { sfx.tap(); this.setJacket(b.dataset.jacket === '1'); }));
 
     $('#nameInput').addEventListener('input', (e) => {
       this.state.name = e.target.value;
@@ -157,7 +157,7 @@ export class Setup {
 
   setJacket(on) {
     this.state.jacket = on;
-    $$('.seg__btn').forEach((b) => b.setAttribute('aria-checked', String((b.dataset.jacket === '1') === on)));
+    $$('.seg__btn', this.root).forEach((b) => b.setAttribute('aria-checked', String((b.dataset.jacket === '1') === on)));
     this.preview?.setAvatar(this.state.char, on);
     this._thumbs();
   }

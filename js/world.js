@@ -537,7 +537,6 @@ export class World {
     const rim = new THREE.Mesh(new THREE.TorusGeometry(4.6, 0.08, 8, 72), new THREE.MeshBasicMaterial({ color: 0x35b8ec }));
     rim.rotation.x = Math.PI / 2; rim.position.set(PODIUM.x, 0.23, PODIUM.z);
     scene.add(rim);
-    this.colliders.push({ x: PODIUM.x, z: PODIUM.z, r: PODIUM.r });
 
     const steps = [
       { rank: 1, x: 0, z: -1.0, h: 0.78, color: 0xffd24a, bw: 3.3 },
@@ -545,6 +544,7 @@ export class World {
       { rank: 3, x: 3.0, z: 0.5, h: 0.36, color: 0xf3b184, bw: 2.5 },
     ];
     for (const s of steps) {
+      this.colliders.push({ x: s.x, z: s.z, r: 1.55 });
       const m = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 1.6, s.h, 36), new THREE.MeshLambertMaterial({ color: s.color }));
       m.position.set(s.x, 0.22 + s.h / 2, s.z);
       scene.add(m);
@@ -971,7 +971,7 @@ export class World {
     if (!pl) return false;
     const sign = this.signs.find((s) => s.entry?.id === id);
     const npc = this.npcs.get(id) || this.remotes.get(id);
-    if (sign) pl.pos.set(sign.pos.x * 1.25, 0, 6.3);
+    if (sign) pl.pos.set(sign.pos.x, 0, sign.pos.z + 2.6);
     else if (npc) pl.pos.set(npc.pos.x * 0.92 + 0.4, 0, npc.pos.z * 0.92 + 1.8);
     else return false;
     this._resolve(pl.pos, 0.45);

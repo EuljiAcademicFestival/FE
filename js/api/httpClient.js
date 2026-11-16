@@ -88,7 +88,7 @@ export class HttpClient {
         message: payload?.message || res.statusText || '요청에 실패했습니다.',
         data: payload?.data ?? null,
       });
-      if (res.status === 401) {
+      if (res.status === 401 && auth) {
         tokenStore.clear();
         this.onUnauthorized?.(error);
       }
