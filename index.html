@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
   <meta name="theme-color" content="#bfeaff">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <title>학술제 방명록</title>
@@ -41,6 +42,36 @@
       <h1 class="loader__title">학술제 방명록</h1>
       <div class="bar"><i id="loadFill"></i></div>
       <p id="loadText" class="loader__text">캐릭터를 불러오는 중…</p>
+    </div>
+  </section>
+
+  <section id="auth" class="screen" hidden>
+    <div class="setup">
+      <header class="setup__head">
+        <div class="logo"><span class="logo__year" id="authYear">2026</span><span class="logo__title" id="authTitle">학술제 방명록</span></div>
+      </header>
+      <form id="authForm" novalidate>
+        <div class="seg" role="radiogroup" aria-label="로그인 또는 회원가입">
+          <button type="button" role="radio" data-mode="login" class="seg__btn" aria-checked="true">로그인</button>
+          <button type="button" role="radio" data-mode="signup" class="seg__btn" aria-checked="false">회원가입</button>
+        </div>
+        <div class="panel field-panel">
+          <label class="field">
+            <span class="field__label">이메일</span>
+            <input id="authEmail" name="email" type="email" autocomplete="email" inputmode="email" placeholder="visitor@example.com">
+            <small class="field__err" id="authEmailErr" role="alert"></small>
+          </label>
+          <label class="field">
+            <span class="field__label">비밀번호</span>
+            <input id="authPw" name="password" type="password" autocomplete="current-password" placeholder="비밀번호">
+            <small class="field__err" id="authPwErr" role="alert"></small>
+          </label>
+          <p class="hint" id="authHint"></p>
+        </div>
+        <footer class="setup__nav">
+          <button type="submit" class="btn btn--primary" id="authSubmit">로그인</button>
+        </footer>
+      </form>
     </div>
   </section>
 

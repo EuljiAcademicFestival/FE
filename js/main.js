@@ -1,5 +1,8 @@
-import { CONFIG } from './config.js';
-import { createStore, myProfile, saveMyProfile } from './store.js';
+﻿import { CONFIG } from './config.js';
+import { createStore, myProfile as localProfile, saveMyProfile } from './store.js';
+import { ApiStore } from './apiStore.js';
+import { authGate } from './auth.js';
+import { API_CONFIG, isConfigured, resolveWsUrl, RealtimeClient, http } from './api/index.js';
 import { loadCharacters } from './avatars.js';
 import { Controls } from './controls.js';
 import { World } from './world.js';
@@ -8,14 +11,32 @@ import { sfx } from './audio.js';
 
 const $ = (s) => document.querySelector(s);
 
+const useApi = isConfigured(API_CONFIG.baseUrl);
+
 async function boot() {
   loading.set(0.04, '캐릭터를 불러오는 중…');
   let store;
   try {
     await Promise.race([document.fonts?.ready, new Promise((r) => setTimeout(r, 2500))]);
     await loadCharacters((p) => loading.set(0.05 + p * 0.8));
-    loading.set(0.9, '방명록을 불러오는 중…');
-    store = await createStore();
+    if (useApi) {
+      CONFIG.limits.message = 100;
+      http.onUnauthorized = () => {
+        toast('로그인이 만료됐어요. 다시 로그인해 주세요.', 3000);
+        setTimeout(() => location.reload(), 1600);
+      };
+      store = new ApiStore();
+      if (!store.loggedIn) {
+        loading.hide();
+        await authGate(store);
+        loading.set(0.9, '방명록을 불러오는 중…');
+      }
+      loading.set(0.9, '방명록을 불러오는 중…');
+      await store.ready();
+    } else {
+      loading.set(0.9, '방명록을 불러오는 중…');
+      store = await createStore();
+    }
   } catch (err) {
     console.error(err);
     loading.error('불러오지 못했어요. 네트워크를 확인하고 새로고침해 주세요.');
@@ -26,18 +47,23 @@ async function boot() {
   const controls = new Controls({ stick: $('#stick'), jump: $('#jump'), canvas: $('#world') });
   controls.enabled = false;
 
+  let rt = null;
   let world;
   try {
-    world = new World({ canvas: $('#world'), controls, onNear: (id) => showNear(id), onTap: (id) => showNear(id, { pin: true }) });
+    world = new World({
+      canvas: $('#world'), controls,
+      onNear: (id) => showNear(id), onTap: (id) => showNear(id, { pin: true }),
+      onPose: (pose, opt) => rt?.sendMove(pose, opt),
+    });
   } catch (err) {
     console.error(err);
     loading.error('이 기기/브라우저에서는 3D를 사용할 수 없어요. 최신 Chrome 또는 Safari로 열어 주세요.');
     return;
   }
 
-  const getMyId = () => myProfile()?.id ?? null;
+  const myProfile = () => (useApi ? store.myProfile() : localProfile());
+  const getMyId = () => (useApi ? (store.memberId != null ? String(store.memberId) : null) : myProfile()?.id ?? null);
 
-  /* ---------- 좋아요 ---------- */
   async function like(id, btn) {
     if (id === getMyId()) return;
     sfx.unlock();
@@ -54,7 +80,6 @@ async function boot() {
     if (on && btn?.isConnected) burstHearts(btn);
   }
 
-  /* ---------- UI 조립 ---------- */
   const card = new NearCard({ store, getMyId, onLike: like });
   const board = new Board({
     store, getMyId, onLike: like,
@@ -64,7 +89,16 @@ async function boot() {
       if (world.teleportToEntry(id)) { showNear(id, { pin: true }); sfx.next(); }
       else toast(`${e ? e.name : '이'}님은 지금 월드에 없어요. 목록에서 하트를 눌러 주세요.`, 2800);
     },
-    onToggle: (open) => { controls.enabled = !open; if (open) controls.reset(); },
+    onToggle: (open) => {
+      controls.enabled = !open;
+      if (open) {
+        controls.reset();
+        if (useApi && Date.now() - (store._reloadedAt || 0) > 5000) {
+          store._reloadedAt = Date.now();
+          store.reload().catch((e) => console.warn(e));
+        }
+      }
+    },
   });
   const setup = new Setup();
 
@@ -89,8 +123,13 @@ async function boot() {
     $('#boardCount').textContent = entries.length > 99 ? '99+' : entries.length;
   });
 
-  /* ---------- 입장 / 수정 ---------- */
   async function saveProfile(data) {
+    if (useApi) {
+      if (store.pending) { const id = await store.add(data); return { id, ...data }; }
+      const id = String(store.memberId);
+      await store.update(id, data);
+      return { id, ...data };
+    }
     const prev = myProfile();
     let id = prev?.id && store.get(prev.id) ? prev.id : null;
     if (id) await store.update(id, data);
@@ -99,9 +138,9 @@ async function boot() {
     return { id, ...data };
   }
 
-  async function enterWorld(data, { editing }) {
+  async function enterWorld(data, { editing, skipSave = false }) {
     sfx.unlock();
-    const me = await saveProfile(data);
+    const me = skipSave ? { ...data, id: getMyId() } : await saveProfile(data);
     world.setPlayer(me);
     world.setEntries(store.entries);
     setup.close();
@@ -112,6 +151,45 @@ async function boot() {
     world.start({ intro: !editing });
     sfx.enter();
     toast(editing ? '내 정보를 저장했어요' : `${me.name}님, 환영해요! 조이스틱으로 돌아다녀 보세요`, 3200);
+    if (rt && !rt.wanted) rt.connect();
+  }
+
+  if (useApi && resolveWsUrl()) {
+    const isMe = (memberId) => String(memberId) === getMyId();
+    const remoteInfo = (e) => ({ id: e.id, char: e.char, jacket: e.jacket, name: e.name, grade: e.grade });
+    let wasOnline = false;
+    rt = new RealtimeClient({
+      onStatus: (s) => {
+        if (s === 'offline' && wasOnline) { world.clearRemotes(); world.setNpcsEnabled(true); toast('실시간 연결이 끊겼어요. 다시 연결하는 중…', 2600); }
+      },
+      onWelcome: (d) => {
+        const reconnect = wasOnline;
+        wasOnline = true;
+        world.setNpcsEnabled(false);
+        const others = (d.players || []).filter((p) => !isMe(p.identity.memberId))
+          .map((p) => ({ ...remoteInfo(store.upsertIdentity(p.identity)), pose: p.pose }));
+        world.setRemotePlayers(others);
+        world.announcePose();
+        if (reconnect) store.reload().catch((e) => console.warn(e));
+      },
+      onPlayerJoined: ({ identity, pose }) => {
+        if (isMe(identity.memberId)) return;
+        world.addRemote(remoteInfo(store.upsertIdentity(identity)), pose);
+      },
+      onPlayerLeft: ({ memberId }) => world.removeRemote(String(memberId)),
+      onPlayerUpdated: (identity) => {
+        const e = store.upsertIdentity(identity);
+        if (!isMe(identity.memberId)) world.updateRemote(remoteInfo(e));
+      },
+      onState: (players) => players.forEach((p) => world.setRemotePose(String(p.memberId), p.pose)),
+      onEngagement: (d) => store.applyEngagement(d),
+      onAuthFailed: () => {
+        toast('로그인이 만료됐어요. 다시 로그인해 주세요.', 3000);
+        store.logout();
+        setTimeout(() => location.reload(), 1600);
+      },
+    });
+    window.addEventListener('pagehide', () => rt?.disconnect());
   }
 
   const first = myProfile();
@@ -132,9 +210,9 @@ async function boot() {
 
   loading.hide();
   document.body.classList.remove('in-world');
-  openSetup(false);
+  if (useApi && !store.pending && first) enterWorld(first, { editing: false, skipSave: true });
+  else openSetup(false);
 
-  /* ---------- HUD 버튼 ---------- */
   $('#btnBoard').addEventListener('click', () => { sfx.next(); board.open(); });
   $('#btnMe').addEventListener('click', () => {
     sfx.tap();
@@ -146,7 +224,6 @@ async function boot() {
   $('#btnPlaza').addEventListener('click', () => { sfx.tap(); world.goToPlaza(); toast('Top 3 광장으로 왔어요'); });
   startClock();
 
-  // 탭이 백그라운드로 가면 조이스틱 입력 초기화
   document.addEventListener('visibilitychange', () => { if (document.hidden) controls.reset(); });
 }
 

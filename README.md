@@ -28,6 +28,13 @@ js/ui.js            입력 마법사 · 대시보드 · 근처 말풍선
 assets/models/      캐릭터 GLB 6종 (사복/과잠 토글) + 에셋 README(라이선스 안내)
 ```
 
+## 서버 연동 및 환경 설정
+
+- **프런트엔드 배포 주소**: `https://eulji-academic-festival.vercel.app`
+- **백엔드 API 주소**: `https://54-180-119-168.sslip.io`
+- **WebSocket 주소**: `wss://54-180-119-168.sslip.io/ws/festival`
+- 환경 설정 파일: `js/env.js` (`.env.example` 참고), `js/api/apiConfig.js`, `vercel.json` (보안 헤더/CSP)
+
 ## 방명록을 모두와 공유하려면 (Firebase)
 
 기본은 **데모 모드**라서 데이터가 각자 기기에만 저장되고, 예시 방명록 8개가 들어 있습니다.

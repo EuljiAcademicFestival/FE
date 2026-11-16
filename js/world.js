@@ -1,4 +1,4 @@
-// 3D 월드: 하늘에 떠 있는 잔디 섬 + 중앙 Top 3 시상대 팻말 + 방명록 작성자 캐릭터들
+﻿// 3D 월드: 하늘에 떠 있는 잔디 섬 + 중앙 Top 3 시상대 팻말 + 방명록 작성자 캐릭터들
 
 import * as THREE from 'three';
 import { CONFIG, gradeOf } from './config.js';
@@ -419,14 +419,39 @@ class Npc extends Entity {
   }
 }
 
+/* ---------------------------------------------------------------- remote */
+
+class RemotePlayer extends Entity {
+  constructor({ id, char, jacket, name, grade }, pose) {
+    super({ charId: char, jacket, name, grade });
+    this.entry = { id, char, jacket, name, grade };
+    this.targetPos = new THREE.Vector3();
+    this.targetYaw = 0;
+    this.setPose(pose, true);
+  }
+  setPose(pose, snap = false) {
+    if (!pose) return;
+    this.targetPos.set(pose.x, pose.y || 0, pose.z);
+    this.targetYaw = pose.yaw || 0;
+    if (snap) { this.pos.copy(this.targetPos); this.facing = this.targetYaw; this.av.root.rotation.y = this.facing; }
+  }
+}
+
 /* ----------------------------------------------------------------- world */
 
 export class World {
-  constructor({ canvas, controls, onNear, onTap }) {
+  constructor({ canvas, controls, onNear, onTap, onPose }) {
     this.canvas = canvas;
     this.controls = controls;
     this.onNear = onNear;
     this.onTap = onTap;
+    this.onPose = onPose;
+
+    this.remotes = new Map();
+    this.npcsEnabled = true;
+    this._poseAt = 0;
+    this._lastPose = null;
+    this._poseIdle = true;
 
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, powerPreference: 'high-performance' });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -676,7 +701,7 @@ export class World {
   }
 
   _syncNpcs() {
-    const want = this.entries
+    const want = (this.npcsEnabled ? this.entries : [])
       .filter((e) => e.id !== this.me?.id)
       .sort((a, b) => b.createdAt - a.createdAt)
       .slice(0, CONFIG.maxNpcs);
@@ -700,6 +725,95 @@ export class World {
       const npc = new Npc(e, slot);
       this.npcs.set(e.id, npc);
       this.scene.add(npc.holder);
+    }
+  }
+
+  /* ---------------------------------------------------- realtime (WS) */
+
+  setNpcsEnabled(on) {
+    if (this.npcsEnabled === on) return;
+    this.npcsEnabled = on;
+    this._syncNpcs();
+  }
+
+  setRemotePlayers(list) {
+    const ids = new Set(list.map((p) => p.id));
+    for (const id of [...this.remotes.keys()]) if (!ids.has(id)) this.removeRemote(id);
+    list.forEach((p) => this.addRemote(p, p.pose));
+  }
+
+  addRemote(info, pose) {
+    if (info.id === this.me?.id) return;
+    const cur = this.remotes.get(info.id);
+    if (cur) { this.updateRemote(info); cur.setPose(pose); return; }
+    const r = new RemotePlayer(info, pose);
+    this.remotes.set(info.id, r);
+    this.scene.add(r.holder);
+  }
+
+  removeRemote(id) {
+    const r = this.remotes.get(id);
+    if (!r) return;
+    r.dispose();
+    this.remotes.delete(id);
+    if (this.nearId === id) { this.nearId = null; this.onNear?.(null); }
+  }
+
+  updateRemote(info) {
+    const r = this.remotes.get(info.id);
+    if (!r) return;
+    const o = r.entry;
+    if (o.char === info.char && o.jacket === info.jacket && o.name === info.name && o.grade === info.grade) return;
+    const pos = r.pos.clone(), pose = { x: pos.x, y: pos.y, z: pos.z, yaw: r.targetYaw };
+    this.removeRemote(info.id);
+    this.addRemote(info, pose);
+  }
+
+  setRemotePose(id, pose) { this.remotes.get(id)?.setPose(pose); }
+
+  clearRemotes() { for (const id of [...this.remotes.keys()]) this.removeRemote(id); }
+
+  _others() { return [...this.npcs.values(), ...this.remotes.values()]; }
+
+  _updateRemotes(dt) {
+    for (const r of this.remotes.values()) {
+      const d = Math.hypot(r.targetPos.x - r.pos.x, r.targetPos.z - r.pos.z);
+      const k = damp(10, dt);
+      r.pos.x = lerp(r.pos.x, r.targetPos.x, k);
+      r.pos.z = lerp(r.pos.z, r.targetPos.z, k);
+      r.pos.y = lerp(r.pos.y, r.targetPos.y, damp(16, dt));
+      r.facing = lerpAngle(r.facing, r.targetYaw, damp(12, dt));
+      r.av.root.rotation.y = r.facing;
+      const air = r.pos.y > 0.05;
+      r.shadow.position.y = 0.03 - r.pos.y;
+      animateAvatar(r.av, dt, d > 0.05 ? Math.min(1, d * 1.5) : 0, this.t, air);
+    }
+  }
+
+  _sendPose(now) {
+    const pl = this.player;
+    if (!pl || !this.onPose) return;
+    const p = { x: pl.pos.x, y: pl.pos.y, z: pl.pos.z, yaw: pl.facing };
+    const l = this._lastPose;
+    const moved = !l || Math.abs(p.x - l.x) > 0.01 || Math.abs(p.y - l.y) > 0.01 || Math.abs(p.z - l.z) > 0.01 || Math.abs(p.yaw - l.yaw) > 0.02;
+    if (moved) {
+      this._poseIdle = false;
+      if (now - this._poseAt >= 100) { this._poseAt = now; this._lastPose = p; this.onPose(p, { force: false }); }
+    } else if (!this._poseIdle) {
+      this._poseIdle = true;
+      this._poseAt = now;
+      this.onPose(p, { force: true });
+    }
+  }
+
+  announcePose() {
+    this._lastPose = null;
+    this._poseIdle = false;
+    if (this.player && this.onPose) {
+      const pl = this.player;
+      const p = { x: pl.pos.x, y: pl.pos.y, z: pl.pos.z, yaw: pl.facing };
+      this._lastPose = p;
+      this.onPose(p, { force: true });
     }
   }
 
@@ -793,7 +907,7 @@ export class World {
       const d = Math.hypot(s.pos.x - p.x, s.pos.z - p.z);
       if (d < 6.2 && d - 1.5 < bestD) { best = s.entry.id; bestD = d - 1.5; }
     }
-    for (const n of this.npcs.values()) {
+    for (const n of this._others()) {
       const d = Math.hypot(n.pos.x - p.x, n.pos.z - p.z);
       if (d < 3.4 && d < bestD) { best = n.entry.id; bestD = d; }
     }
@@ -837,7 +951,7 @@ export class World {
     const ray = this.raycaster.ray;
     const sphere = new THREE.Sphere();
     const hit = new THREE.Vector3();
-    for (const n of this.npcs.values()) {
+    for (const n of this._others()) {
       sphere.set(new THREE.Vector3(n.pos.x, 1.0, n.pos.z), 1.1);
       if (ray.intersectSphere(sphere, hit)) {
         const d = hit.distanceTo(ray.origin);
@@ -856,7 +970,7 @@ export class World {
     const pl = this.player;
     if (!pl) return false;
     const sign = this.signs.find((s) => s.entry?.id === id);
-    const npc = this.npcs.get(id);
+    const npc = this.npcs.get(id) || this.remotes.get(id);
     if (sign) pl.pos.set(sign.pos.x * 1.25, 0, 6.3);
     else if (npc) pl.pos.set(npc.pos.x * 0.92 + 0.4, 0, npc.pos.z * 0.92 + 1.8);
     else return false;
@@ -899,6 +1013,8 @@ export class World {
       this.t += dt;
       this._updatePlayer(dt);
       this._updateNpcs(dt);
+      this._updateRemotes(dt);
+      this._sendPose(now);
       this.signs.forEach((s) => s.update(this.t));
       this.clouds.rotation.y += dt * 0.006;
       this._updateNear(dt);
@@ -914,6 +1030,7 @@ export class World {
       const cam = this.camera.position;
       const fade = (e) => { e.tag.material.opacity = clamp((34 - e.pos.distanceTo(cam)) / 10, 0, 1); };
       this.npcs.forEach(fade);
+      this.remotes.forEach(fade);
 
       this.renderer.render(this.scene, this.camera);
     });

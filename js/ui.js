@@ -1,4 +1,4 @@
-// DOM UI: 로딩 / 입력 마법사 / 방명록 대시보드 / 근처 말풍선 / HUD
+﻿// DOM UI: 로딩 / 입력 마법사 / 방명록 대시보드 / 근처 말풍선 / HUD
 
 import { CONFIG, CHARACTERS, GRADES, characterOf, gradeOf } from './config.js';
 import { avatarThumb, AvatarPreview } from './avatars.js';
@@ -337,7 +337,7 @@ export class Board {
 
   render() {
     const entries = [...this.store.entries];
-    const rank = new Map(rankEntries(entries).map((e, i) => [e.id, i + 1]));
+    const rank = new Map(rankEntries(entries).map((e, i) => [e.id, e.rank ?? i + 1]));
     entries.sort(this.sort === 'likes'
       ? (a, b) => b.likes - a.likes || a.createdAt - b.createdAt
       : (a, b) => b.createdAt - a.createdAt);
@@ -357,7 +357,7 @@ export class Board {
           <div class="entry__head">${entryHead(e, r, mine)}</div>
           <p class="entry__msg">${esc(e.message)}</p>
           <div class="entry__foot">
-            <time class="entry__time">${timeAgo(e.createdAt)}</time>
+            <time class="entry__time">${e.elapsedTimeText || timeAgo(e.createdAt)}</time>
             <div class="entry__actions">
               ${mine ? '' : `<button type="button" class="find" data-find="${esc(e.id)}"><svg class="ic"><use href="#i-pin"/></svg>찾아가기</button>`}
               ${likeBtn(e, mine, this.store.isLiked(e.id))}
@@ -403,7 +403,9 @@ export class NearCard {
     if (!e) { this.id = null; this.el.hidden = true; return; }
     const changed = this.id !== id;
     this.id = id;
-    const rank = rankEntries(this.store.entries).findIndex((x) => x.id === id) + 1;
+    const top = rankEntries(this.store.entries);
+    const ti = top.findIndex((x) => x.id === id);
+    const rank = ti < 0 ? 0 : (top[ti].rank ?? ti + 1);
     const mine = id === this.getMyId();
     this.el.innerHTML = `
       <img class="near__avatar" alt="" src="${avatarThumb(e.char, e.jacket)}">

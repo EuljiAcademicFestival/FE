@@ -1,4 +1,4 @@
-// 방명록 데이터 계층.
+﻿// 방명록 데이터 계층.
 //  - LocalStore    : localStorage (데모/오프라인). 이 기기에만 저장.
 //  - FirebaseStore : Firestore 실시간 공유. CONFIG.firebase 가 있으면 사용.
 // 두 구현은 같은 인터페이스: ready / subscribe / get / add / update / toggleLike / isLiked
@@ -11,11 +11,17 @@ const LS = {
   me: 'gb.me.v1',
 };
 
-const read = (k, d) => { try { const v = JSON.parse(localStorage.getItem(k)); return v ?? d; } catch { return d; } };
-const write = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* 저장 불가 환경 */ } };
+export const read = (k, d) => { try { const v = JSON.parse(localStorage.getItem(k)); return v ?? d; } catch { return d; } };
+export const write = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* 저장 불가 환경 */ } };
 
 /** 좋아요 1개 이상인 방명록 중 상위 3개. 동점이면 먼저 쓴 글이 앞. */
 export function rankEntries(list, n = 3) {
+  if (list.some((e) => e.rank !== undefined)) {
+    return list
+      .filter((e) => e.rank)
+      .sort((a, b) => a.rank - b.rank || b.likes - a.likes || a.createdAt - b.createdAt)
+      .slice(0, n);
+  }
   return list
     .filter((e) => e.likes > 0)
     .sort((a, b) => b.likes - a.likes || a.createdAt - b.createdAt)
@@ -25,7 +31,7 @@ export function rankEntries(list, n = 3) {
 export const myProfile = () => read(LS.me, null);
 export const saveMyProfile = (p) => write(LS.me, p);
 
-class BaseStore {
+export class BaseStore {
   constructor() {
     this.entries = [];
     this.listeners = new Set();
